@@ -1,0 +1,19 @@
+# Gradle & Android Build Outputs
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+*.log
+
+# Video files (Exclude raw and compressed media from git)
+video 1/
+*.mp4
+*.MP4
+*.mkv
+*.avi
+*.mov
+
+# Keep release APK
+!KioskTVPlayer-release.apk

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="tv_focus_bg">#FF2979FF</color>
+    <color name="tv_focus_stroke">#FF82B1FF</color>
+    <color name="tv_unfocused_bg">#2A2A2A</color>
+    <color name="dialog_bg">#EE1E1E1E</color>
+    <color name="text_secondary">#AAAAAA</color>
+    <color name="accent">#00E676</color>
+</resources>

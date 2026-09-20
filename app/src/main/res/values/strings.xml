@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kiosk TV Player</string>
+    <string name="no_video_found_title">Video no encontrado</string>
+    <string name="no_video_found_message">Por favor, coloca tu archivo de video en:\n%1$s\no pulsa OK en el mando para seleccionar otro archivo.</string>
+    <string name="select_video">Seleccionar Video</string>
+    <string name="select_file">Elegir este archivo</string>
+    <string name="permission_required">Se requiere permiso de acceso a archivos para reproducir el video.</string>
+    <string name="grant_permission">Conceder Permiso</string>
+    <string name="current_path">Ruta actual: %1$s</string>
+    <string name="parent_dir">📁 .. (Subir nivel)</string>
+    <string name="playing_video">Reproduciendo: %1$s</string>
+    <string name="hint_menu">Presiona Menú o mantén OK para cambiar el video</string>
+</resources>
