@@ -28,8 +28,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.ui.PlayerView
+import android.os.Handler
+import android.os.Looper
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -42,6 +46,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_CACHED_SIZE = "cached_video_size"
         private const val KEY_CACHED_MODIFIED = "cached_video_modified"
         private const val KEY_CACHED_SOURCE_PATH = "cached_source_path"
+        private const val RETRY_DELAY_MS = 1500L
         var isRunning: Boolean = false
     }
 
@@ -56,6 +61,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sharedPreferences: SharedPreferences
     private var activeDialog: FilePickerDialog? = null
     private var currentlyPlayingPath: String? = null
+    private var preferSoftwareDecoder: Boolean = false
+    private var consecutiveErrorCount: Int = 0
+    private var lastSavedPlaybackPosition: Long = 0L
+
+    private val retryHandler = Handler(Looper.getMainLooper())
+    private val retryPlaybackRunnable = Runnable {
+        Log.i(TAG, "[Mitigación] Ejecutando reintento de reproducción automático y transparente (preferSoftwareDecoder=$preferSoftwareDecoder)")
+        restartPlaybackAfterError()
+    }
 
     // Permisos en runtime
     private val requestStoragePermissionLauncher =
@@ -137,6 +151,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        retryHandler.removeCallbacks(retryPlaybackRunnable)
         releasePlayer()
     }
 
@@ -212,24 +227,85 @@ class MainActivity : AppCompatActivity() {
 
     private fun initPlayer() {
         if (exoPlayer == null) {
-            exoPlayer = ExoPlayer.Builder(this).build().apply {
+            val renderersFactory = DefaultRenderersFactory(this).apply {
+                if (preferSoftwareDecoder) {
+                    setMediaCodecSelector { mimeType, requiresSecure, requiresTunneling ->
+                        val list = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecure, requiresTunneling)
+                        Log.d(TAG, "[Mitigación] Ordenando codecs por software para mimeType=$mimeType (total=${list.size})")
+                        // Preferir decodificadores de software (OMX.google / c2.android) ante inestabilidad de hardware
+                        list.sortedWith(Comparator { a, b ->
+                            val aIsSw = a.name.startsWith("OMX.google", ignoreCase = true) || a.name.startsWith("c2.android", ignoreCase = true)
+                            val bIsSw = b.name.startsWith("OMX.google", ignoreCase = true) || b.name.startsWith("c2.android", ignoreCase = true)
+                            when {
+                                aIsSw && !bIsSw -> -1
+                                !aIsSw && bIsSw -> 1
+                                else -> 0
+                            }
+                        })
+                    }
+                }
+            }
+
+            exoPlayer = ExoPlayer.Builder(this, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_ALL
                 playWhenReady = true
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
-                        Log.e(TAG, "Error durante la reproducción en bucle: ${error.message}", error)
-                        showErrorOverlay("Error al reproducir el video. Verifique el formato del archivo.\n${error.message}")
+                        Log.e(TAG, "[Diagnóstico] Error en ExoPlayer: ${error.errorCodeName} (${error.errorCode}): ${error.message}", error)
+
+                        // Guardar la posición actual para reanudar transparentemente si es posible
+                        try {
+                            val currentPos = currentPosition
+                            if (currentPos > 0) {
+                                lastSavedPlaybackPosition = currentPos
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "[Diagnóstico] No se pudo obtener la posición actual del reproductor", e)
+                        }
+
+                        consecutiveErrorCount++
+                        if (consecutiveErrorCount >= 2 && !preferSoftwareDecoder) {
+                            Log.w(TAG, "[Mitigación] Múltiples fallos detectados con decodificador por hardware. Activando fallback a decodificador por software.")
+                            preferSoftwareDecoder = true
+                        }
+
+                        // Reintento transparente sin mostrar pantalla de error al espectador
+                        retryHandler.removeCallbacks(retryPlaybackRunnable)
+                        retryHandler.postDelayed(retryPlaybackRunnable, RETRY_DELAY_MS)
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
                             hideOverlay()
+                            consecutiveErrorCount = 0
+                            Log.d(TAG, "[Diagnóstico] Reproducción en estado READY exitosa")
                         }
                     }
                 })
             }
             playerView.player = exoPlayer
             playerView.useController = false
+        }
+    }
+
+    private fun restartPlaybackAfterError() {
+        val currentFile = currentlyPlayingPath?.let { File(it) } ?: resolveVideoFile()
+        if (currentFile == null || !currentFile.exists()) {
+            Log.e(TAG, "[Diagnóstico] No se encontró el archivo de video durante el reintento automático")
+            val targetPath = getSavedVideoPath() ?: DEFAULT_VIDEO_PATH
+            showNoVideoOverlay(targetPath)
+            return
+        }
+
+        Log.i(TAG, "[Mitigación] Reinicializando reproductor tras error. Archivo: ${currentFile.absolutePath}, Posición guardada: ${lastSavedPlaybackPosition}ms")
+        releasePlayer()
+        initPlayer()
+
+        val mediaItem = MediaItem.fromUri(Uri.fromFile(currentFile))
+        exoPlayer?.let { player ->
+            player.setMediaItem(mediaItem, lastSavedPlaybackPosition)
+            player.prepare()
+            player.play()
         }
     }
 

@@ -56,6 +56,15 @@ Durante el desarrollo e integración con BigDroidOS 2.0.1 surgieron particularid
 * **Problema:** Leer videos pesados directamente desde tarjetas MicroSD físicas extraíbles resultó inestable: velocidades de lectura lentas, desconexiones aleatorias en puertos de bajo costo y riesgo de ANR (App Not Responding) si se intentaban copiar archivos pesados en el hilo principal.
 * **Solución:** Almacenar el contenido en el almacenamiento flash interno del televisor (`/storage/emulated/0/Movies/video.mp4`, accesible vía el symlink `/sdcard/Movies/video.mp4`). La memoria flash interna ofrece lectura inmediata con latencia <1ms y es inmune a desconexiones mecánicas.
 
+### 2.6. Inestabilidad HDMI y Error de Decodificador Allwinner (`0xffffffc2` / -62)
+* **Problema detectado:** El video se reproducía normalmente durante uno o varios ciclos, pero súbitamente saltaba un cartel de error en pantalla (`MediaCodecVideoRenderer error ... Decoder failed: OMX.allwinner.video.decoder.avc`).
+  * **Causa raíz:** A través de la inspección de `logcat` en el TV (`displayd` / `sunxihwc`), se detectó inestabilidad física o renegociación intermitente en la conexión HDMI (`hotplug change: name=6000000.hdmi, state=HDMI=0` seguido de `HDMI=1`).
+  * Al desconectarse y reconectarse el HDMI, Android destruye la superficie nativa de renderizado (`SurfaceUtils: disconnecting from surface`). Esto provocaba que el decodificador de hardware Allwinner CedarC se bloqueara arrojando el error `0xffffffc2` (-62 fatal) y ExoPlayer abortara mostrando el overlay de error.
+* **Solución y Mitigación Transparente Implementada:**
+  1. **Recuperación Silenciosa sin Overlays:** Se eliminó cualquier mensaje o cartel de error visible en pantalla para el público. La app atrapa el fallo en `Player.Listener.onPlayerError`, preserva la posición del video (`lastSavedPlaybackPosition`) y programa una reinicialización limpia mediante un `Handler` tras 1.5s.
+  2. **Fallback Dinámico a Decodificación por Software:** Si ocurren 2 fallos consecutivos en el decodificador de hardware, `MainActivity` conmuta automáticamente a través de un `DefaultRenderersFactory` con `MediaCodecSelector` personalizado para priorizar decodificadores de software (`OMX.google.h264.decoder` / `c2.android.*`). Los decodificadores por software son inmunes a bloqueos de driver al perder superficies nativas.
+  3. **Trazabilidad Diagnóstica:** Todos los eventos de conmutación y recuperación se registran en `logcat` con los prefijos `[Diagnóstico]` y `[Mitigación]`, permitiendo auditar la estabilidad de forma remota sin interrumpir la experiencia visual en el quiosco.
+
 ---
 
 ## 3. Estrategia de Compresión y Optimización de Video (FFmpeg)
