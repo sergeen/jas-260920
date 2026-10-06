@@ -65,6 +65,18 @@ Durante el desarrollo e integración con BigDroidOS 2.0.1 surgieron particularid
   2. **Fallback Dinámico a Decodificación por Software:** Si ocurren 2 fallos consecutivos en el decodificador de hardware, `MainActivity` conmuta automáticamente a través de un `DefaultRenderersFactory` con `MediaCodecSelector` personalizado para priorizar decodificadores de software (`OMX.google.h264.decoder` / `c2.android.*`). Los decodificadores por software son inmunes a bloqueos de driver al perder superficies nativas.
   3. **Trazabilidad Diagnóstica:** Todos los eventos de conmutación y recuperación se registran en `logcat` con los prefijos `[Diagnóstico]` y `[Mitigación]`, permitiendo auditar la estabilidad de forma remota sin interrumpir la experiencia visual en el quiosco.
 
+### 2.7. Alimentación por USB, Caída de Tensión (*Brownout*) y Parpadeo de Pantalla
+* **Problema detectado:** La pantalla LED conectada al TV Box comenzó a parpadear o perder energía después de varios días de funcionamiento continuo, pese a haber funcionado con normalidad inicialmente.
+* **Diagnóstico en Sistema Operativo / Kernel:**
+  * **Estado de Software:** El regulador del bus USB (`/sys/devices/platform/usb0-drvvvbus/regulator/regulator.8`) se encuentra siempre en estado `enabled`, y el servicio de sistema `powerlock.sh` (`echo powerlock > /sys/power/wake_lock`) se ejecuta continuamente previniendo cualquier suspensión de energía a nivel SO. No existe ninguna directiva de software apagando los puertos.
+  * **Causa Eléctrica (Hardware):**
+    * Los puertos USB de los TV Boxes Allwinner entregan un estándar de **500 mA (2.5W)** pensado para periféricos menores (teclados, dongles RF).
+    * Una pantalla LED demanda comúnmente entre **1.5A y 2.5A (7.5W - 12.5W)** dependiendo de la intensidad del brillo.
+    * Mantener la pantalla alimentada desde el USB del TV Box genera fatiga térmica y sobrecarga continua en el regulador interno y la fuente de poder del TV Box. Esto produce caídas de tensión (*voltage brownouts*) por debajo del voltaje mínimo de operación de la pantalla.
+    * Cada vez que la tensión cae, la pantalla se apaga o reinicia por una fracción de segundo, lo que inmediatamente corta la sincronía HDMI (`hotplug HDMI=0 -> HDMI=1`), desencadenando el parpadeo visual y el error de decodificación en cadena descrito en el punto 2.6.
+* **Solución de Infraestructura Requerida:**
+  * **Alimentación Externa Dedicada:** Alimentar la pantalla LED siempre con una fuente de alimentación externa de **5V (mínimo 2A a 3A)** independiente. Conectar al TV Box únicamente el cable HDMI de señal de video (y compartir tierra GND si fuese necesario), evitando extraer la energía de los puertos USB del dispositivo.
+
 ---
 
 ## 3. Estrategia de Compresión y Optimización de Video (FFmpeg)
